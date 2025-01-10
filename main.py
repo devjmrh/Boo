@@ -1,7 +1,7 @@
 import telebot
 import os
-import zipfile
 import subprocess
+import speedtest
 
 # قراءة التوكن من Environment Variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -12,7 +12,7 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # المجلد الذي سيُحفظ فيه المشروع
-BASE_DIR = "/tmp/uploaded_projects"
+BASE_DIR = "uploaded_projects"
 
 # التأكد من وجود المجلد
 if not os.path.exists(BASE_DIR):
@@ -20,7 +20,46 @@ if not os.path.exists(BASE_DIR):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile و requirements.txt.")
+    bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile.")
+
+@bot.message_handler(commands=['stop'])
+def stop_process(message):
+    global running_process
+    if running_process and running_process.poll() is None:
+        running_process.terminate()
+        bot.reply_to(message, "تم إيقاف العملية بنجاح.")
+    else:
+        bot.reply_to(message, "لا توجد عملية قيد التشغيل حاليًا.")
+
+@bot.message_handler(commands=['logs'])
+def get_logs(message):
+    global log_file_path
+    if log_file_path and os.path.exists(log_file_path):
+        with open(log_file_path, "r") as log_file:
+            logs = log_file.readlines()[-10:]
+        bot.reply_to(message, "آخر 10 أسطر من السجل:\n" + "".join(logs))
+    else:
+        bot.reply_to(message, "لم يتم العثور على سجل أو أن السجل فارغ.")
+
+@bot.message_handler(commands=['net'])
+def check_network_speed(message):
+    try:
+        bot.reply_to(message, "جاري قياس سرعة الإنترنت، يرجى الانتظار...")
+        st = speedtest.Speedtest()
+        st.get_best_server()
+        download_speed = st.download() / 1_000_000  # تحويل إلى ميغابت
+        upload_speed = st.upload() / 1_000_000      # تحويل إلى ميغابت
+        ping = st.results.ping
+
+        bot.reply_to(
+            message,
+            f"سرعة الإنترنت:\n"
+            f"📥 تنزيل: {download_speed:.2f} Mbps\n"
+            f"📤 رفع: {upload_speed:.2f} Mbps\n"
+            f"📡 Ping: {ping:.2f} ms"
+        )
+    except Exception as e:
+        bot.reply_to(message, f"حدث خطأ أثناء قياس سرعة الإنترنت: {str(e)}")
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
@@ -46,52 +85,22 @@ def handle_document(message):
                 zip_ref.extractall(project_dir)
 
             bot.reply_to(message, "تم فك الضغط بنجاح! جاري البحث عن ملف Procfile...")
-            process_project(project_dir, message)
+            read_procfile_and_run(project_dir, message)
         else:
             bot.reply_to(message, "الرجاء إرسال ملف ZIP فقط.")
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
-def process_project(project_dir, message):
+def read_procfile_and_run(project_dir, message):
     try:
-        # البحث عن ملف Procfile
-        procfile_path = find_file("Procfile", project_dir)
-        if not procfile_path:
+        global running_process, log_file_path
+
+        # مسار ملف Procfile
+        procfile_path = os.path.join(project_dir, "Procfile")
+        if not os.path.exists(procfile_path):
             bot.reply_to(message, "ملف Procfile غير موجود داخل المشروع!")
             return
 
-        bot.reply_to(message, f"تم العثور على ملف Procfile في: {procfile_path}")
-
-        # تثبيت المكتبات من requirements.txt إذا وجد
-        requirements_path = find_file("requirements.txt", project_dir)
-        if requirements_path:
-            bot.reply_to(message, "تم العثور على ملف requirements.txt. جاري تثبيت المكتبات...")
-            install_requirements(requirements_path, message)
-        else:
-            bot.reply_to(message, "ملف requirements.txt غير موجود. سيتم تشغيل المشروع بدون تثبيت مكتبات.")
-
-        # تشغيل المشروع
-        run_procfile(procfile_path, message)
-    except Exception as e:
-        bot.reply_to(message, f"حدث خطأ أثناء معالجة المشروع: {str(e)}")
-
-def find_file(file_name, search_dir):
-    """البحث عن ملف معين في جميع المجلدات الفرعية."""
-    for root, dirs, files in os.walk(search_dir):
-        if file_name in files:
-            return os.path.join(root, file_name)
-    return None
-
-def install_requirements(requirements_path, message):
-    try:
-        command = f"pip install -r {requirements_path}"
-        process = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        bot.reply_to(message, "تم تثبيت المكتبات بنجاح!")
-    except subprocess.CalledProcessError as e:
-        bot.reply_to(message, f"حدث خطأ أثناء تثبيت المكتبات: {e.stderr.decode()}")
-
-def run_procfile(procfile_path, message):
-    try:
         # قراءة ملف Procfile
         with open(procfile_path, "r") as f:
             lines = f.readlines()
@@ -102,15 +111,23 @@ def run_procfile(procfile_path, message):
                 # استخراج الأمر بعد "worker:"
                 command = line.split("worker:")[1].strip()
                 bot.reply_to(message, f"جاري تشغيل الأمر: {command}")
-                
-                # تشغيل الأمر
-                process = subprocess.Popen(command, shell=True, cwd=os.path.dirname(procfile_path))
-                bot.reply_to(message, f"تم تشغيل المشروع بنجاح! PID: {process.pid}")
+
+                # تشغيل الأمر وحفظ السجل
+                log_file_path = os.path.join(project_dir, "logs.txt")
+                with open(log_file_path, "w") as log_file:
+                    running_process = subprocess.Popen(
+                        command, shell=True, cwd=project_dir, stdout=log_file, stderr=subprocess.STDOUT
+                    )
+                bot.reply_to(message, f"تم تشغيل المشروع بنجاح! PID: {running_process.pid}")
                 return
         
         bot.reply_to(message, "لم يتم العثور على تعريف worker في ملف Procfile!")
     except Exception as e:
-        bot.reply_to(message, f"حدث خطأ أثناء تشغيل Procfile: {str(e)}")
+        bot.reply_to(message, f"حدث خطأ أثناء قراءة أو تشغيل Procfile: {str(e)}")
+
+# تعريف المتغيرات العالمية
+running_process = None
+log_file_path = None
 
 # بدء تشغيل البوت
 bot.polling()
