@@ -2,6 +2,7 @@ import telebot
 import os
 import zipfile
 import subprocess
+import time
 
 # قراءة التوكن من Environment Variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -96,5 +97,16 @@ def run_procfile(procfile_path, message):
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء تشغيل Procfile: {str(e)}")
 
+def start_bot():
+    """تشغيل البوت مع التعامل مع الأخطاء."""
+    while True:
+        try:
+            print("🚀 بدء تشغيل البوت...")
+            bot.polling()
+        except Exception as e:
+            print(f"⚠️ حدث خطأ: {e}. إعادة تشغيل البوت خلال 5 ثوانٍ...")
+            time.sleep(5)
+
 # بدء تشغيل البوت
-bot.polling()
+if __name__ == "__main__":
+    start_bot()
