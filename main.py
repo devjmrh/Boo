@@ -2,7 +2,6 @@ import telebot
 import os
 import zipfile
 import subprocess
-import threading
 
 # قراءة التوكن من Environment Variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -13,30 +12,15 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # المجلد الذي سيُحفظ فيه المشروع
-BASE_DIR = "uploaded_projects"
+BASE_DIR = "/tmp/uploaded_projects"
 
 # التأكد من وجود المجلد
 if not os.path.exists(BASE_DIR):
     os.makedirs(BASE_DIR)
 
-# متغير للتحكم في العمليات
-processes = {}
-
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile.")
-
-@bot.message_handler(commands=['s'])
-def stop(message):
-    # إيقاف العملية التي تم تشغيلها من خلال Procfile
-    global processes
-    if processes:
-        for pid, process in processes.items():
-            process.terminate()
-            bot.reply_to(message, f"تم إيقاف العملية: {pid}")
-        processes.clear()
-    else:
-        bot.reply_to(message, "لا توجد عملية قيد التشغيل للإيقاف.")
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
@@ -62,31 +46,36 @@ def handle_document(message):
                 zip_ref.extractall(project_dir)
 
             bot.reply_to(message, "تم فك الضغط بنجاح! جاري البحث عن ملف Procfile...")
-            check_procfile(project_dir, message)
+            process_project(project_dir, message)
         else:
             bot.reply_to(message, "الرجاء إرسال ملف ZIP فقط.")
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
-def check_procfile(project_dir, message):
-    procfile_path = os.path.join(project_dir, "Procfile")
-    
-    # التحقق من وجود الملف
-    if os.path.exists(procfile_path):
-        bot.reply_to(message, "تم العثور على Procfile!")
-        with open(procfile_path, "r") as f:
-            bot.reply_to(message, f"محتويات Procfile:\n{f.read()}")
-        
-        # استدعاء دالة تشغيل المشروع
-        run_procfile(project_dir, message)
-    else:
-        bot.reply_to(message, "لم يتم العثور على Procfile!")
-
-def run_procfile(project_dir, message):
+def process_project(project_dir, message):
     try:
-        # مسار ملف Procfile
-        procfile_path = os.path.join(project_dir, "Procfile")
-        
+        # البحث عن ملف Procfile
+        procfile_path = find_file("Procfile", project_dir)
+        if not procfile_path:
+            bot.reply_to(message, "ملف Procfile غير موجود داخل المشروع!")
+            return
+
+        bot.reply_to(message, f"تم العثور على ملف Procfile في: {procfile_path}")
+
+        # تشغيل المشروع
+        run_procfile(procfile_path, message)
+    except Exception as e:
+        bot.reply_to(message, f"حدث خطأ أثناء معالجة المشروع: {str(e)}")
+
+def find_file(file_name, search_dir):
+    """البحث عن ملف معين في جميع المجلدات الفرعية."""
+    for root, dirs, files in os.walk(search_dir):
+        if file_name in files:
+            return os.path.join(root, file_name)
+    return None
+
+def run_procfile(procfile_path, message):
+    try:
         # قراءة ملف Procfile
         with open(procfile_path, "r") as f:
             lines = f.readlines()
@@ -99,14 +88,13 @@ def run_procfile(project_dir, message):
                 bot.reply_to(message, f"جاري تشغيل الأمر: {command}")
                 
                 # تشغيل الأمر
-                process = subprocess.Popen(command, shell=True, cwd=project_dir)
-                processes[process.pid] = process  # حفظ العملية في القاموس
+                process = subprocess.Popen(command, shell=True, cwd=os.path.dirname(procfile_path))
                 bot.reply_to(message, f"تم تشغيل المشروع بنجاح! PID: {process.pid}")
                 return
         
         bot.reply_to(message, "لم يتم العثور على تعريف worker في ملف Procfile!")
     except Exception as e:
-        bot.reply_to(message, f"حدث خطأ أثناء قراءة أو تشغيل Procfile: {str(e)}")
+        bot.reply_to(message, f"حدث خطأ أثناء تشغيل Procfile: {str(e)}")
 
 # بدء تشغيل البوت
 bot.polling()
