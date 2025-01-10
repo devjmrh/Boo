@@ -2,9 +2,15 @@ import telebot
 import os
 import zipfile
 import subprocess
+from dotenv import load_dotenv
 
-# توكن البوت
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+# تحميل التوكن من ملف .env
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    raise ValueError("الرجاء ضبط متغير البيئة BOT_TOKEN لتشغيل البوت.")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
