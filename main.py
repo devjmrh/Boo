@@ -12,7 +12,7 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # المجلد الذي سيُحفظ فيه المشروع
-BASE_DIR = "/tmp/uploaded_projects"
+BASE_DIR = "uploaded_projects"
 
 # التأكد من وجود المجلد
 if not os.path.exists(BASE_DIR):
@@ -20,7 +20,7 @@ if not os.path.exists(BASE_DIR):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile.")
+    bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile و requirements.txt.")
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
@@ -46,20 +46,48 @@ def handle_document(message):
                 zip_ref.extractall(project_dir)
 
             bot.reply_to(message, "تم فك الضغط بنجاح! جاري البحث عن ملف Procfile...")
-            read_procfile_and_run(project_dir, message)
+            process_project(project_dir, message)
         else:
             bot.reply_to(message, "الرجاء إرسال ملف ZIP فقط.")
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
-def read_procfile_and_run(project_dir, message):
+def process_project(project_dir, message):
     try:
-        # مسار ملف Procfile
-        procfile_path = os.path.join(project_dir, "Procfile")
-        if not os.path.exists(procfile_path):
-            bot.reply_to(message, "ملف Procfile غير موجود داخل المشروع!")
+        # البحث عن Procfile
+        procfile_path = None
+        for root, dirs, files in os.walk(project_dir):
+            if "Procfile" in files:
+                procfile_path = os.path.join(root, "Procfile")
+                break
+
+        if not procfile_path:
+            bot.reply_to(message, "ملف Procfile غير موجود في أي من المجلدات الفرعية!")
             return
 
+        # تثبيت المكتبات من requirements.txt إذا وجد
+        requirements_path = os.path.join(os.path.dirname(procfile_path), "requirements.txt")
+        if os.path.exists(requirements_path):
+            bot.reply_to(message, "تم العثور على ملف requirements.txt. جاري تثبيت المكتبات...")
+            install_requirements(requirements_path, message)
+        else:
+            bot.reply_to(message, "ملف requirements.txt غير موجود. سيتم تشغيل المشروع بدون تثبيت مكتبات.")
+
+        # تشغيل المشروع
+        run_procfile(procfile_path, message)
+    except Exception as e:
+        bot.reply_to(message, f"حدث خطأ أثناء معالجة المشروع: {str(e)}")
+
+def install_requirements(requirements_path, message):
+    try:
+        command = f"pip install -r {requirements_path}"
+        process = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        bot.reply_to(message, "تم تثبيت المكتبات بنجاح!")
+    except subprocess.CalledProcessError as e:
+        bot.reply_to(message, f"حدث خطأ أثناء تثبيت المكتبات: {e.stderr.decode()}")
+
+def run_procfile(procfile_path, message):
+    try:
         # قراءة ملف Procfile
         with open(procfile_path, "r") as f:
             lines = f.readlines()
@@ -72,13 +100,13 @@ def read_procfile_and_run(project_dir, message):
                 bot.reply_to(message, f"جاري تشغيل الأمر: {command}")
                 
                 # تشغيل الأمر
-                process = subprocess.Popen(command, shell=True, cwd=project_dir)
+                process = subprocess.Popen(command, shell=True, cwd=os.path.dirname(procfile_path))
                 bot.reply_to(message, f"تم تشغيل المشروع بنجاح! PID: {process.pid}")
                 return
         
         bot.reply_to(message, "لم يتم العثور على تعريف worker في ملف Procfile!")
     except Exception as e:
-        bot.reply_to(message, f"حدث خطأ أثناء قراءة أو تشغيل Procfile: {str(e)}")
+        bot.reply_to(message, f"حدث خطأ أثناء تشغيل Procfile: {str(e)}")
 
 # بدء تشغيل البوت
 bot.polling()
