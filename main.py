@@ -13,8 +13,8 @@ if not BOT_TOKEN:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# المجلد الذي سيُحفظ فيه المشروع
-BASE_DIR = "uploaded_projects"
+# استخدم مجلد مؤقت مثل /tmp
+BASE_DIR = "/tmp/uploaded_projects"
 
 # التأكد من وجود المجلد
 if not os.path.exists(BASE_DIR):
