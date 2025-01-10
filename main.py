@@ -12,7 +12,7 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # المجلد الذي سيُحفظ فيه المشروع
-BASE_DIR = "uploaded_projects"
+BASE_DIR = "/tmp/uploaded_projects"
 
 # التأكد من وجود المجلد
 if not os.path.exists(BASE_DIR):
@@ -54,20 +54,17 @@ def handle_document(message):
 
 def process_project(project_dir, message):
     try:
-        # البحث عن Procfile
-        procfile_path = None
-        for root, dirs, files in os.walk(project_dir):
-            if "Procfile" in files:
-                procfile_path = os.path.join(root, "Procfile")
-                break
-
+        # البحث عن ملف Procfile
+        procfile_path = find_file("Procfile", project_dir)
         if not procfile_path:
-            bot.reply_to(message, "ملف Procfile غير موجود في أي من المجلدات الفرعية!")
+            bot.reply_to(message, "ملف Procfile غير موجود داخل المشروع!")
             return
 
+        bot.reply_to(message, f"تم العثور على ملف Procfile في: {procfile_path}")
+
         # تثبيت المكتبات من requirements.txt إذا وجد
-        requirements_path = os.path.join(os.path.dirname(procfile_path), "requirements.txt")
-        if os.path.exists(requirements_path):
+        requirements_path = find_file("requirements.txt", project_dir)
+        if requirements_path:
             bot.reply_to(message, "تم العثور على ملف requirements.txt. جاري تثبيت المكتبات...")
             install_requirements(requirements_path, message)
         else:
@@ -77,6 +74,13 @@ def process_project(project_dir, message):
         run_procfile(procfile_path, message)
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء معالجة المشروع: {str(e)}")
+
+def find_file(file_name, search_dir):
+    """البحث عن ملف معين في جميع المجلدات الفرعية."""
+    for root, dirs, files in os.walk(search_dir):
+        if file_name in files:
+            return os.path.join(root, file_name)
+    return None
 
 def install_requirements(requirements_path, message):
     try:
