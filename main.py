@@ -3,7 +3,6 @@ import os
 import zipfile
 import subprocess
 import threading
-import signal
 
 # قراءة التوكن من Environment Variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -13,8 +12,8 @@ if not BOT_TOKEN:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# استخدم مجلد مؤقت مثل /tmp
-BASE_DIR = "/tmp/uploaded_projects"
+# المجلد الذي سيُحفظ فيه المشروع
+BASE_DIR = "uploaded_projects"
 
 # التأكد من وجود المجلد
 if not os.path.exists(BASE_DIR):
@@ -63,20 +62,31 @@ def handle_document(message):
                 zip_ref.extractall(project_dir)
 
             bot.reply_to(message, "تم فك الضغط بنجاح! جاري البحث عن ملف Procfile...")
-            run_procfile(project_dir, message)
+            check_procfile(project_dir, message)
         else:
             bot.reply_to(message, "الرجاء إرسال ملف ZIP فقط.")
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
+def check_procfile(project_dir, message):
+    procfile_path = os.path.join(project_dir, "Procfile")
+    
+    # التحقق من وجود الملف
+    if os.path.exists(procfile_path):
+        bot.reply_to(message, "تم العثور على Procfile!")
+        with open(procfile_path, "r") as f:
+            bot.reply_to(message, f"محتويات Procfile:\n{f.read()}")
+        
+        # استدعاء دالة تشغيل المشروع
+        run_procfile(project_dir, message)
+    else:
+        bot.reply_to(message, "لم يتم العثور على Procfile!")
+
 def run_procfile(project_dir, message):
     try:
         # مسار ملف Procfile
         procfile_path = os.path.join(project_dir, "Procfile")
-        if not os.path.exists(procfile_path):
-            bot.reply_to(message, "ملف Procfile غير موجود داخل المشروع!")
-            return
-
+        
         # قراءة ملف Procfile
         with open(procfile_path, "r") as f:
             lines = f.readlines()
