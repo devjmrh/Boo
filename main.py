@@ -1,13 +1,10 @@
 import telebot
 import os
+import zipfile
 import subprocess
-import speedtest
 
-# قراءة التوكن من Environment Variables
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-if not BOT_TOKEN:
-    raise ValueError("الرجاء ضبط متغير البيئة BOT_TOKEN لتشغيل البوت.")
+# توكن البوت
+BOT_TOKEN = "YOUR_BOT_TOKEN"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -20,46 +17,29 @@ if not os.path.exists(BASE_DIR):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile.")
+    bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile لتشغيله.")
 
 @bot.message_handler(commands=['stop'])
-def stop_process(message):
-    global running_process
-    if running_process and running_process.poll() is None:
-        running_process.terminate()
-        bot.reply_to(message, "تم إيقاف العملية بنجاح.")
+def stop_project(message):
+    global process
+    if process and process.poll() is None:
+        process.terminate()
+        bot.reply_to(message, "تم إيقاف المشروع بنجاح.")
     else:
-        bot.reply_to(message, "لا توجد عملية قيد التشغيل حاليًا.")
+        bot.reply_to(message, "لا يوجد مشروع قيد التشغيل حاليًا.")
 
 @bot.message_handler(commands=['logs'])
 def get_logs(message):
-    global log_file_path
-    if log_file_path and os.path.exists(log_file_path):
-        with open(log_file_path, "r") as log_file:
-            logs = log_file.readlines()[-10:]
-        bot.reply_to(message, "آخر 10 أسطر من السجل:\n" + "".join(logs))
-    else:
-        bot.reply_to(message, "لم يتم العثور على سجل أو أن السجل فارغ.")
-
-@bot.message_handler(commands=['net'])
-def check_network_speed(message):
     try:
-        bot.reply_to(message, "جاري قياس سرعة الإنترنت، يرجى الانتظار...")
-        st = speedtest.Speedtest()
-        st.get_best_server()
-        download_speed = st.download() / 1_000_000  # تحويل إلى ميغابت
-        upload_speed = st.upload() / 1_000_000      # تحويل إلى ميغابت
-        ping = st.results.ping
-
-        bot.reply_to(
-            message,
-            f"سرعة الإنترنت:\n"
-            f"📥 تنزيل: {download_speed:.2f} Mbps\n"
-            f"📤 رفع: {upload_speed:.2f} Mbps\n"
-            f"📡 Ping: {ping:.2f} ms"
-        )
+        if not os.path.exists("project_logs.txt"):
+            bot.reply_to(message, "لا توجد سجلات لعرضها.")
+            return
+        
+        with open("project_logs.txt", "r") as log_file:
+            logs = log_file.readlines()[-10:]  # قراءة آخر 10 أسطر من السجل
+        bot.reply_to(message, "سجلات المشروع الأخيرة:\n" + "".join(logs))
     except Exception as e:
-        bot.reply_to(message, f"حدث خطأ أثناء قياس سرعة الإنترنت: {str(e)}")
+        bot.reply_to(message, f"حدث خطأ أثناء قراءة السجلات: {str(e)}")
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
@@ -92,9 +72,8 @@ def handle_document(message):
         bot.reply_to(message, f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
 def read_procfile_and_run(project_dir, message):
+    global process
     try:
-        global running_process, log_file_path
-
         # مسار ملف Procfile
         procfile_path = os.path.join(project_dir, "Procfile")
         if not os.path.exists(procfile_path):
@@ -111,23 +90,21 @@ def read_procfile_and_run(project_dir, message):
                 # استخراج الأمر بعد "worker:"
                 command = line.split("worker:")[1].strip()
                 bot.reply_to(message, f"جاري تشغيل الأمر: {command}")
-
+                
                 # تشغيل الأمر وحفظ السجل
-                log_file_path = os.path.join(project_dir, "logs.txt")
+                log_file_path = os.path.join("project_logs.txt")
                 with open(log_file_path, "w") as log_file:
-                    running_process = subprocess.Popen(
-                        command, shell=True, cwd=project_dir, stdout=log_file, stderr=subprocess.STDOUT
-                    )
-                bot.reply_to(message, f"تم تشغيل المشروع بنجاح! PID: {running_process.pid}")
+                    process = subprocess.Popen(command, shell=True, cwd=project_dir, stdout=log_file, stderr=log_file)
+                
+                bot.reply_to(message, f"تم تشغيل المشروع بنجاح! PID: {process.pid}")
                 return
         
         bot.reply_to(message, "لم يتم العثور على تعريف worker في ملف Procfile!")
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء قراءة أو تشغيل Procfile: {str(e)}")
 
-# تعريف المتغيرات العالمية
-running_process = None
-log_file_path = None
+# متغير العملية
+process = None
 
 # بدء تشغيل البوت
-bot.polling()
+bot.infinity_polling()
