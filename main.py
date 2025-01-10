@@ -2,11 +2,10 @@ import telebot
 import os
 import zipfile
 import subprocess
-from dotenv import load_dotenv
+import threading
+import signal
 
-# تحميل التوكن من ملف .env
-load_dotenv()
-
+# قراءة التوكن من Environment Variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
@@ -21,31 +20,24 @@ BASE_DIR = "uploaded_projects"
 if not os.path.exists(BASE_DIR):
     os.makedirs(BASE_DIR)
 
+# متغير للتحكم في العمليات
+processes = {}
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile لتشغيله.")
+    bot.reply_to(message, "مرحبًا! أرسل لي ملف ZIP يحتوي على مشروعك مع ملف Procfile.")
 
-@bot.message_handler(commands=['stop'])
-def stop_project(message):
-    global process
-    if process and process.poll() is None:
-        process.terminate()
-        bot.reply_to(message, "تم إيقاف المشروع بنجاح.")
+@bot.message_handler(commands=['s'])
+def stop(message):
+    # إيقاف العملية التي تم تشغيلها من خلال Procfile
+    global processes
+    if processes:
+        for pid, process in processes.items():
+            process.terminate()
+            bot.reply_to(message, f"تم إيقاف العملية: {pid}")
+        processes.clear()
     else:
-        bot.reply_to(message, "لا يوجد مشروع قيد التشغيل حاليًا.")
-
-@bot.message_handler(commands=['logs'])
-def get_logs(message):
-    try:
-        if not os.path.exists("project_logs.txt"):
-            bot.reply_to(message, "لا توجد سجلات لعرضها.")
-            return
-        
-        with open("project_logs.txt", "r") as log_file:
-            logs = log_file.readlines()[-10:]  # قراءة آخر 10 أسطر من السجل
-        bot.reply_to(message, "سجلات المشروع الأخيرة:\n" + "".join(logs))
-    except Exception as e:
-        bot.reply_to(message, f"حدث خطأ أثناء قراءة السجلات: {str(e)}")
+        bot.reply_to(message, "لا توجد عملية قيد التشغيل للإيقاف.")
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
@@ -71,14 +63,13 @@ def handle_document(message):
                 zip_ref.extractall(project_dir)
 
             bot.reply_to(message, "تم فك الضغط بنجاح! جاري البحث عن ملف Procfile...")
-            read_procfile_and_run(project_dir, message)
+            run_procfile(project_dir, message)
         else:
             bot.reply_to(message, "الرجاء إرسال ملف ZIP فقط.")
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء معالجة الملف: {str(e)}")
 
-def read_procfile_and_run(project_dir, message):
-    global process
+def run_procfile(project_dir, message):
     try:
         # مسار ملف Procfile
         procfile_path = os.path.join(project_dir, "Procfile")
@@ -97,11 +88,9 @@ def read_procfile_and_run(project_dir, message):
                 command = line.split("worker:")[1].strip()
                 bot.reply_to(message, f"جاري تشغيل الأمر: {command}")
                 
-                # تشغيل الأمر وحفظ السجل
-                log_file_path = os.path.join("project_logs.txt")
-                with open(log_file_path, "w") as log_file:
-                    process = subprocess.Popen(command, shell=True, cwd=project_dir, stdout=log_file, stderr=log_file)
-                
+                # تشغيل الأمر
+                process = subprocess.Popen(command, shell=True, cwd=project_dir)
+                processes[process.pid] = process  # حفظ العملية في القاموس
                 bot.reply_to(message, f"تم تشغيل المشروع بنجاح! PID: {process.pid}")
                 return
         
@@ -109,8 +98,5 @@ def read_procfile_and_run(project_dir, message):
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ أثناء قراءة أو تشغيل Procfile: {str(e)}")
 
-# متغير العملية
-process = None
-
 # بدء تشغيل البوت
-bot.infinity_polling()
+bot.polling()
